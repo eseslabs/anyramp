@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { OrderSheet } from "@/components/order-sheet";
 import { activeOrder, type Order } from "@/lib/orders";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/app")({
   head: () => ({
     meta: [
       { title: "Anyramp — Trustless onramp & offramp on Stellar" },
