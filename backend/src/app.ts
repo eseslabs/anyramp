@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { pinoLogger } from 'hono-pino';
 import { swaggerUI } from '@hono/swagger-ui';
 import { logger } from './lib/logger.ts';
@@ -11,6 +12,7 @@ import { webhook } from './routes/webhook.ts';
 export const app = new Hono();
 
 app.use(pinoLogger({ pino: logger }));
+app.use('*', cors());
 
 // API docs: OpenAPI spec + Swagger UI at the root.
 app.get('/openapi.json', (c) => c.json(openApiDoc));
