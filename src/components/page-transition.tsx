@@ -13,8 +13,9 @@ export function PageTransition({ children }: { children: ReactNode }) {
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={reduce ? undefined : { opacity: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-        style={{ minHeight: "100%", willChange: "opacity" }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="w-full"
+        style={{ willChange: "opacity" }}
       >
         {children}
       </motion.div>

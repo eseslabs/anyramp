@@ -20,7 +20,7 @@ const ONRAMP: Step[] = [
   {
     icon: Receipt,
     title: "Send fiat privately",
-    body: "Pay your peer with SEPA, card, or Pix from your bank app.",
+    body: "Pay your peer with QRIS from your banking or e-wallet app.",
     tip: "Anyramp never sees your bank login. The payment leaves your device, not your data.",
   },
   {

@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -11,8 +12,10 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportError } from "../lib/error-reporting";
+import { AppShell, isAppRoute } from "../components/app-shell";
 import { ToastProvider } from "../components/toast";
 import { PageTransition } from "../components/page-transition";
+import { ClientWalletProvider } from "../components/wallet/wallet-provider";
 
 function NotFoundComponent() {
   return (
@@ -75,6 +78,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  loader: () => undefined,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -100,9 +104,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://api.fontshare.com" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,400..700;1,400..700&display=swap",
+      },
+      {
+        rel: "stylesheet",
+        href: "https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap",
       },
     ],
   }),
@@ -129,15 +138,25 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const inApp = isAppRoute(pathname);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <PageTransition>
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-        </PageTransition>
-      </ToastProvider>
+      <ClientWalletProvider>
+        <ToastProvider>
+          {inApp ? (
+            <AppShell>
+              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+              <Outlet />
+            </AppShell>
+          ) : (
+            <PageTransition>
+              <Outlet />
+            </PageTransition>
+          )}
+        </ToastProvider>
+      </ClientWalletProvider>
     </QueryClientProvider>
   );
 }

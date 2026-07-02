@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowLeft, ShieldCheck, Loader2, CheckCircle2, ExternalLink } from "lucide-react";
 import { StellarIcon } from "@/components/stellar-icon";
+import { AssetIcon } from "@/components/asset-icon";
 
 type Side = "onramp" | "offramp";
 type Asset = "USDC" | "XLM";
@@ -130,14 +131,17 @@ export function DemoWidget() {
                   })}
                 </div>
                 {side === "onramp" ? (
-                  <select
-                    value={asset}
-                    onChange={(e) => { setAsset(e.target.value as Asset); reset(); }}
-                    className="rounded-full bg-background px-3 py-1.5 text-sm ring-1 ring-black/5"
-                  >
-                    <option value="USDC">USDC</option>
-                    <option value="XLM">XLM</option>
-                  </select>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-background py-1.5 pl-2 pr-3 ring-1 ring-black/5">
+                    <AssetIcon asset={asset} className="size-4 text-foreground" />
+                    <select
+                      value={asset}
+                      onChange={(e) => { setAsset(e.target.value as Asset); reset(); }}
+                      className="bg-transparent text-sm outline-none"
+                    >
+                      <option value="USDC">USDC</option>
+                      <option value="XLM">XLM</option>
+                    </select>
+                  </div>
                 ) : (
                   <span className="pb-2 text-sm text-muted-foreground">EUR</span>
                 )}

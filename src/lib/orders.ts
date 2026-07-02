@@ -7,7 +7,7 @@ export type Order = {
   asset: "USDC" | "XLM";
   amount: string; // signed amount
   fiat: string;
-  method: "SEPA" | "Card" | "Pix";
+  method: "QRIS";
   rate: string;
   status: OrderStatus;
   when: string;
@@ -28,9 +28,9 @@ export const orders: Order[] = [
     kind: "onramp",
     asset: "USDC",
     amount: "+850.00",
-    fiat: "€850.00 · SEPA",
-    method: "SEPA",
-    rate: "1 USDC = 1.00 USD",
+    fiat: "Rp850.000 · QRIS",
+    method: "QRIS",
+    rate: "1 USDC = Rp15.850",
     status: "verifying",
     when: "14:02",
     day: "Today",
@@ -40,16 +40,16 @@ export const orders: Order[] = [
     stellarAccount: "GAYR…XQK7",
     proofSizeKb: 14,
     proofTimeMs: 1840,
-    circuit: "groth16/sep_payment_v3",
+    circuit: "groth16/qris_payment_v1",
   },
   {
     id: "8839-ZK",
     kind: "offramp",
     asset: "USDC",
     amount: "−210.00",
-    fiat: "€209.62 · SEPA",
-    method: "SEPA",
-    rate: "1 USDC = 0.998 EUR",
+    fiat: "Rp209.620 · QRIS",
+    method: "QRIS",
+    rate: "1 USDC = 0.998 USD",
     status: "settled",
     when: "09:18",
     day: "Today",
@@ -59,15 +59,15 @@ export const orders: Order[] = [
     stellarAccount: "GAYR…XQK7",
     proofSizeKb: 13,
     proofTimeMs: 1610,
-    circuit: "groth16/sep_payment_v3",
+    circuit: "groth16/qris_payment_v1",
   },
   {
     id: "8821-ZK",
     kind: "onramp",
     asset: "XLM",
     amount: "+1,200.00",
-    fiat: "$134.80 · Card",
-    method: "Card",
+    fiat: "Rp134.800 · QRIS",
+    method: "QRIS",
     rate: "1 XLM = 0.112 USD",
     status: "settled",
     when: "20:44",
@@ -78,15 +78,15 @@ export const orders: Order[] = [
     stellarAccount: "GAYR…XQK7",
     proofSizeKb: 12,
     proofTimeMs: 1502,
-    circuit: "groth16/card_payment_v2",
+    circuit: "groth16/qris_payment_v1",
   },
   {
     id: "8815-ZK",
     kind: "offramp",
     asset: "USDC",
     amount: "−500.00",
-    fiat: "R$2,498.10 · Pix",
-    method: "Pix",
+    fiat: "Rp2.498.100 · QRIS",
+    method: "QRIS",
     rate: "1 USDC = 4.996 BRL",
     status: "settled",
     when: "11:02",
@@ -97,7 +97,7 @@ export const orders: Order[] = [
     stellarAccount: "GAYR…XQK7",
     proofSizeKb: 15,
     proofTimeMs: 1735,
-    circuit: "groth16/pix_payment_v1",
+    circuit: "groth16/qris_payment_v1",
   },
 ];
 
