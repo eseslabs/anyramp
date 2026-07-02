@@ -17,7 +17,84 @@ import { proofToContractArgs, type ReclaimProofLike } from './zkprover.ts';
 import type { Order } from '../db/schema.ts';
 
 const server = () => new rpc.Server(env.SOROBAN_RPC_URL);
+
 const contract = () => new Contract(env.ESCROW_CONTRACT_ID);
+const contractFor = (id: string) => new Contract(id);
+
+const netArgs = () => [
+  '--rpc-url', env.SOROBAN_RPC_URL,
+  '--network-passphrase', env.NETWORK_PASSPHRASE,
+  '--source', env.DEPLOYER_KEY,
+];
+
+/** Run the stellar CLI async (non-blocking — never freezes the Bun event loop). */
+async function runStellar(args: string[]): Promise<string> {
+  const proc = Bun.spawn([env.STELLAR_BIN, ...args], {
+    cwd: process.cwd(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  await proc.exited;
+  const out = (await new Response(proc.stdout).text()).trim();
+  if (proc.exitCode !== 0) {
+    throw new Error(`stellar ${args[0]} ${args[1]}: ${(await new Response(proc.stderr).text()).trim() || out}`);
+  }
+  return out;
+}
+
+/** Deploy + initialize a fresh escrow (allow_sandbox=true). Returns its contract id. */
+export async function deployAndInitEscrow(): Promise<string> {
+  const out = await runStellar([
+    'contract', 'deploy', '--wasm', '../target/wasm32v1-none/release/escrow.wasm', ...netArgs(),
+  ]);
+  const id = out.split('\n').pop()?.trim() ?? '';
+  if (!/^C[A-Z0-9]{55}$/.test(id)) throw new Error(`deploy failed: ${out}`);
+  const admin = Keypair.fromSecret(env.SUBMITTER_SECRET).publicKey();
+  await runStellar([
+    'contract', 'invoke', '--id', id, ...netArgs(), '--send=yes', '--',
+    'initialize', '--admin', admin, '--usdc', env.USDC_CONTRACT_ID,
+    '--verifier', env.RECLAIM_VERIFIER_ID, '--allow_sandbox', 'true',
+  ]);
+  return id;
+}
+
+/** Sign + submit and return the hash immediately, without waiting for confirmation. */
+async function sendNoWait(prepared: Awaited<ReturnType<typeof buildPrepared>>, secret: string) {
+  const s = server();
+  prepared.sign(Keypair.fromSecret(secret));
+  const sent = await s.sendTransaction(prepared);
+  if (sent.status === 'ERROR') throw new Error(`submit failed: ${JSON.stringify(sent.errorResult)}`);
+  return sent.hash;
+}
+
+/** Seller locks USDC for the demo order on a specific escrow. */
+export async function lockOn(
+  escrowId: string,
+  o: { orderId: string; usdcAmount: string; amountIdr: number },
+  project: string,
+) {
+  const seller = Keypair.fromSecret(env.SUBMITTER_SECRET).publicKey();
+  const op = contractFor(escrowId).call(
+    'create_order',
+    scAddr(seller), scText(o.orderId), scText(project),
+    scI128(o.usdcAmount), scU64(o.amountIdr), scU64(9_999_999_999),
+  );
+  const prepared = await buildPrepared(seller, op);
+  return signAndSend(prepared, env.SUBMITTER_SECRET);
+}
+
+/** Fulfill the demo order on a specific escrow. `wait=false` returns right after submit. */
+export async function fulfillOn(
+  escrowId: string,
+  order: { orderId: string },
+  proof: ReclaimProofLike,
+  wait = false,
+) {
+  const buyer = Keypair.fromSecret(env.SUBMITTER_SECRET).publicKey();
+  const op = contractFor(escrowId).call('fulfill_with_proof', ...fulfillArgs(buyer, order as Order, proof));
+  const prepared = await buildPrepared(buyer, op);
+  return wait ? signAndSend(prepared, env.SUBMITTER_SECRET) : sendNoWait(prepared, env.SUBMITTER_SECRET);
+}
 
 const scBytes = (b: Buffer | Uint8Array) => xdr.ScVal.scvBytes(Buffer.from(b));
 const scText = (s: string) => scBytes(Buffer.from(s, 'utf8'));

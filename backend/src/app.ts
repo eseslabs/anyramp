@@ -8,6 +8,7 @@ import { openApiDoc } from './openapi.ts';
 import { health } from './routes/health.ts';
 import { orders } from './routes/orders.ts';
 import { webhook } from './routes/webhook.ts';
+import { demo } from './routes/demo.ts';
 
 export const app = new Hono();
 
@@ -21,6 +22,7 @@ app.get('/', swaggerUI({ url: '/openapi.json' }));
 app.route('/health', health);
 app.route('/orders', orders);
 app.route('/webhook', webhook);
+app.route('/demo', demo);
 
 app.notFound(notFound);
 app.onError(onError);

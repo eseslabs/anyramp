@@ -17,6 +17,10 @@ const schema = z.object({
   RECLAIM_APP_SECRET: z.string().default(''),
 
   ESCROW_CONTRACT_ID: z.string().default(''),
+  USDC_CONTRACT_ID: z.string().default('CCPJ56XM7KNWKJEGEGE3YZA55RSB7GF2DOT47DA2NTBJLYZBNMJD6XCL'),
+  RECLAIM_VERIFIER_ID: z.string().default('CAHEWTDHSWRJOBUD2FZ4UDGVF7PFW53W6RZ2G3O57DONSKWKXIYSZGGQ'),
+  DEPLOYER_KEY: z.string().default('anyramp-deployer'),
+  STELLAR_BIN: z.string().default(`${process.env.HOME}/.cargo/bin/stellar`),
   SOROBAN_RPC_URL: z.string().url().default('https://soroban-testnet.stellar.org'),
   NETWORK_PASSPHRASE: z.string().default('Test SDF Network ; September 2015'),
   // Optional server key for the demo auto-submit path (buyer == submitter).
