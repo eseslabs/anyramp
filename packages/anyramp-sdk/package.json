@@ -1,0 +1,15 @@
+{
+  "name": "@anyramp/sdk",
+  "version": "0.1.0",
+  "description": "Typed AnyRamp escrow SDK — wraps generated contract bindings + proof mapping.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anyramp/escrow-bindings": "workspace:*",
+    "@stellar/stellar-sdk": "^16.0.1"
+  }
+}

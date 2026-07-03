@@ -60,7 +60,7 @@ demo.post('/settle', async (c) => {
     logger.info('demo: pool empty, provisioning on demand');
     escrow = await provisionOne();
   }
-  const hash = await stellar.fulfillOn(escrow, { orderId: DEMO.orderId }, proof, false);
+  const hash = await stellar.fulfillOn(escrow, { orderId: DEMO.orderId }, proof);
   void refill(); // top the pool back up in the background
 
   // Record the settlement against the buyer's order so History reflects it.
