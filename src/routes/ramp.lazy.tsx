@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createLazyFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { Sheet } from "@/components/sheet";
@@ -19,6 +19,9 @@ import {
   usdcFromFiat,
   type CurrencyCode,
 } from "@/lib/currencies";
+import { QRCodeSVG } from "qrcode.react";
+import { api, EXPLORER_TX, type BackendOrder } from "@/lib/api";
+import { STELLAR_NETWORK } from "@/lib/stellar-address";
 
 const FIAT_CURRENCY: CurrencyCode = "IDR";
 const QUICK_AMOUNTS = ["100000", "250000", "500000", "1000000"];
@@ -34,7 +37,10 @@ const paymentMethod = {
   logo: "/QRIS.png",
 } as const;
 
-type Stage = "idle" | "review" | "matching" | "proving" | "done";
+type Stage = "idle" | "review" | "creating" | "pay" | "proving" | "claim" | "settling" | "done";
+
+// Seller/LP that locks USDC in the escrow for demo orders (testnet).
+const DEMO_SELLER = "GAW24ZON4HHNOOO6SD33ZBZR6DNEFIRWJSIANJ5Q2CYTSC5UCQJEKKQC";
 
 function RampPage() {
   const { side } = Route.useSearch();
@@ -46,6 +52,10 @@ function RampPage() {
   const [stage, setStage] = useState<Stage>("idle");
   const [destChoice, setDestChoice] = useState<DestinationChoice>("embedded");
   const [manualAddress, setManualAddress] = useState("");
+  const [order, setOrder] = useState<BackendOrder | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [flowError, setFlowError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const destinationAddress = useMemo(
     () => resolveDestinationAddress(destChoice, wallet, manualAddress),
@@ -69,18 +79,82 @@ function RampPage() {
     }
   }, [side, navigate]);
 
-  useEffect(() => {
-    if (stage === "matching") {
-      const t = setTimeout(() => setStage("proving"), 1400);
-      return () => clearTimeout(t);
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
-    if (stage === "proving") {
-      const t = setTimeout(() => setStage("done"), 2200);
-      return () => clearTimeout(t);
+  };
+  useEffect(() => stopPolling, []);
+
+  // 1. Create the order on the backend — issues a real Pakasir QRIS.
+  const createOrder = async () => {
+    setFlowError(null);
+    setStage("creating");
+    try {
+      const orderId = `ANYRAMP-${Date.now()}`;
+      const stroops = String(Math.round(Number(usdc) * 1e7)); // USDC has 7 decimals on Stellar
+      const created = await api.createOrder({
+        orderId,
+        amountIdr: Number(amount),
+        usdcAmount: stroops,
+        sellerAddress: DEMO_SELLER,
+        buyerAddress: destinationAddress ?? undefined,
+      });
+      // Seller/LP locks the USDC into the on-chain escrow (matched peer).
+      await api.lock(orderId);
+      setOrder(created);
+      setStage("pay");
+    } catch (e) {
+      setFlowError((e as Error).message);
+      setStage("review");
     }
-  }, [stage]);
+  };
+
+  // Claim: external wallet signs the fulfill tx; embedded/local falls back to server-signed.
+  const claimUsdc = async () => {
+    if (!order) return;
+    setFlowError(null);
+    setStage("settling");
+    try {
+      let hash: string;
+      if (wallet.destination?.mode === "external" && destinationAddress) {
+        // stellar-kit is browser-only — keep it out of the SSR module graph.
+        const { signXdrWithExternalWallet } = await import("@/lib/stellar-kit");
+        const { xdr } = await api.settle(order.orderId, destinationAddress);
+        const signed = await signXdrWithExternalWallet(xdr, destinationAddress);
+        ({ hash } = await api.submit(order.orderId, signed));
+      } else {
+        ({ hash } = await api.settleAuto(order.orderId));
+      }
+      setTxHash(hash);
+      setOrder((o) => (o ? { ...o, status: "fulfilled" } : o));
+      setStage("done");
+    } catch (e) {
+      setFlowError((e as Error).message);
+      setStage("claim");
+    }
+  };
+
+  // Verify the payment on-chain and release the USDC. The escrow contract verifies
+  // the zkTLS proof on Stellar and transfers the USDC — settles in a few seconds.
+  const verifyAndReceive = async () => {
+    stopPolling();
+    setFlowError(null);
+    setStage("settling");
+    try {
+      const { hash } = await api.demoSettle(order?.orderId);
+      setTxHash(hash);
+      setOrder((o) => (o ? { ...o, status: "fulfilled" } : o));
+      setStage("done");
+    } catch (e) {
+      setFlowError((e as Error).message);
+      setStage("pay");
+    }
+  };
 
   const closeSheet = () => {
+    stopPolling();
     setStage("idle");
   };
 
@@ -269,9 +343,23 @@ function RampPage() {
       <Sheet
         open={stage !== "idle"}
         onClose={closeSheet}
-        title={stage === "done" ? "Order created" : "Review order"}
+        title={
+          stage === "done"
+            ? "USDC received"
+            : stage === "pay"
+              ? "Pay with QRIS"
+              : stage === "claim" || stage === "settling"
+                ? "Verifying on Stellar"
+                : "Review order"
+        }
       >
-        {stage === "review" && (
+        {flowError && (
+          <div className="mb-4 rounded-2xl bg-red-50 p-3 text-xs leading-relaxed text-red-600 ring-1 ring-red-100">
+            {flowError}
+          </div>
+        )}
+
+        {(stage === "review" || stage === "creating") && (
           <div className="space-y-4">
             <Row
               label={isBuy ? "You pay" : "You sell"}
@@ -286,44 +374,99 @@ function RampPage() {
               value={isBuy ? `${usdc} USDC` : formatFiat(Number(usdc) * CURRENCY_RATES[FIAT_CURRENCY], FIAT_CURRENCY)}
             />
             <Row label="Payment method" value={paymentMethod.label} />
-            <Row label="Destination" value={wallet.shorten(destinationAddress ?? "", 6)} />
+            <Row label="Destination" value={wallet.shorten(destinationAddress ?? "")} />
             <Row
               label="Full address"
               value={
                 <span className="max-w-[12rem] truncate font-mono text-xs">{destinationAddress}</span>
               }
             />
-            <Row label="Network" value="Stellar mainnet" />
+            <Row label="Network" value={`Stellar ${STELLAR_NETWORK}`} />
             <Row label="Network fee" value="0.00001 XLM" />
             <div className="rounded-2xl bg-accent-soft/60 p-4 text-xs leading-relaxed text-foreground/80 ring-1 ring-accent/10">
-              By confirming you'll be matched with a verified peer and Anyramp will generate a
-              zero-knowledge proof of payment on your device.
+              By confirming, a QRIS invoice is issued and the seller's USDC is held in the
+              Anyramp escrow on Stellar. A zkTLS proof of your payment releases it — no one
+              ever sees your bank details.
             </div>
             <button
-              onClick={() => setStage("matching")}
-              className="w-full rounded-full bg-primary py-3.5 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98]"
+              onClick={createOrder}
+              disabled={stage === "creating"}
+              className="w-full rounded-full bg-primary py-3.5 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
             >
-              Confirm & match peer
+              {stage === "creating" ? "Creating order…" : "Confirm & get QRIS"}
             </button>
           </div>
         )}
 
-        {(stage === "matching" || stage === "proving") && (
-          <div className="space-y-5 py-3">
-            <ProvingStep
-              label="Matching peer"
-              done={stage === "proving"}
-              active={stage === "matching"}
+        {stage === "pay" && order && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-surface p-4 ring-1 ring-black/5">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Order ID</p>
+              <p className="mt-0.5 font-mono text-sm">{order.orderId}</p>
+            </div>
+            <Row
+              label="Total to pay"
+              value={formatFiat(order.totalPayment ?? order.amountIdr, FIAT_CURRENCY)}
             />
-            <ProvingStep
-              label="Generating ZK proof"
-              done={false}
-              active={stage === "proving"}
-            />
-            <ProvingStep label="Settling on Stellar" done={false} active={false} />
-            <p className="pt-2 text-center text-xs text-muted-foreground">
-              Keep the app open. Proof generation happens on-device.
+            {order.qrString ? (
+              <div className="flex flex-col items-center gap-3 rounded-2xl bg-white p-5 ring-1 ring-black/5">
+                <QRCodeSVG
+                  value={order.qrString}
+                  size={196}
+                  level="M"
+                  marginSize={2}
+                  imageSettings={{
+                    src: "/QRIS.png",
+                    height: 34,
+                    width: 34,
+                    excavate: true,
+                  }}
+                />
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  QRIS · scan to pay
+                </span>
+              </div>
+            ) : null}
+            <p className="text-center text-xs text-muted-foreground">
+              Scan with any QRIS app (GoPay, OVO, DANA, mobile banking). Sandbox demo: simulate
+              the payment below.
             </p>
+            <button
+              onClick={verifyAndReceive}
+              className="w-full rounded-full bg-primary py-3.5 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98]"
+            >
+              I've paid — verify & receive USDC
+            </button>
+          </div>
+        )}
+
+
+        {(stage === "claim" || stage === "settling") && (
+          <div className="space-y-5">
+            <div className="space-y-5 py-1">
+              <ProvingStep label="Payment detected" done active={false} />
+              <ProvingStep label="zkTLS proof ready" done active={false} />
+              <ProvingStep
+                label="Verify on-chain & release USDC"
+                done={false}
+                active={stage === "settling"}
+              />
+            </div>
+            <div className="rounded-2xl bg-accent-soft/60 p-4 text-xs leading-relaxed text-foreground/80 ring-1 ring-accent/10">
+              The escrow contract re-computes the proof digest on-chain, checks the Reclaim
+              attestor signature, then releases the USDC to your address.
+            </div>
+            <button
+              onClick={claimUsdc}
+              disabled={stage === "settling"}
+              className="w-full rounded-full bg-primary py-3.5 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+            >
+              {stage === "settling"
+                ? "Verifying on Stellar…"
+                : wallet.destination?.mode === "external"
+                  ? "Sign & claim USDC"
+                  : "Claim USDC"}
+            </button>
           </div>
         )}
 
@@ -341,24 +484,29 @@ function RampPage() {
               </span>
             </div>
             <p className="text-center text-sm text-muted-foreground">
-              Your order is open. We'll notify you when the ZK proof verifies on Stellar.
+              ZK proof verified on Stellar — the escrow released your USDC.
             </p>
             <div className="rounded-2xl bg-surface p-4 ring-1 ring-black/5">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Order ID</p>
-              <p className="mt-0.5 font-mono text-sm">8842-ZK</p>
+              <p className="mt-0.5 font-mono text-sm">{order?.orderId}</p>
             </div>
-            {destinationAddress ? (
-              <div className="rounded-2xl bg-surface p-4 ring-1 ring-black/5">
+            {txHash ? (
+              <a
+                href={`${EXPLORER_TX}${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-2xl bg-surface p-4 ring-1 ring-black/5 transition-colors hover:ring-accent/30"
+              >
                 <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  USDC destination
+                  Settlement transaction ↗
                 </p>
-                <p className="mt-0.5 break-all font-mono text-xs">{destinationAddress}</p>
-              </div>
+                <p className="mt-0.5 break-all font-mono text-xs">{txHash}</p>
+              </a>
             ) : null}
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  navigator.clipboard?.writeText("8842-ZK").catch(() => {});
+                  navigator.clipboard?.writeText(order?.orderId ?? "").catch(() => {});
                   show("Order ID copied");
                 }}
                 className="flex-1 rounded-full bg-surface py-3 text-sm font-medium ring-1 ring-black/10"

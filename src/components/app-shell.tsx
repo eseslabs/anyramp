@@ -25,10 +25,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const title = titles[pathname] ?? "Anyramp";
   const wallet = useWallet();
-  const walletLabel =
-    wallet.embeddedAddress ?? wallet.destination?.address
-      ? wallet.shorten(wallet.embeddedAddress ?? wallet.destination!.address, 2)
-      : null;
+  const addr = wallet.embeddedAddress ?? wallet.destination?.address ?? null;
+  const walletLabel = addr ? wallet.shorten(addr) : null;
+  const avatarChar = wallet.embeddedEmail?.[0]?.toUpperCase() ?? addr?.[1] ?? null;
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[480px] flex-col bg-background pb-[calc(5.5rem+env(safe-area-inset-bottom))] text-foreground">
@@ -46,9 +45,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           {walletLabel ? (
             <span className="truncate font-mono text-[11px] text-muted-foreground">{walletLabel}</span>
-          ) : null}
+          ) : (
+            <span className="text-[11px] text-muted-foreground">Connect</span>
+          )}
           <span className="grid size-8 shrink-0 place-items-center rounded-full bg-surface ring-1 ring-black/5">
-            <span className="font-serif text-sm italic text-muted-foreground">a</span>
+            {avatarChar ? (
+              <span className="text-sm font-medium text-foreground">{avatarChar}</span>
+            ) : (
+              <svg className="size-4 text-muted-foreground" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm0 1.25c-2.3 0-4.25 1.32-4.25 3 0 .41.34.75.75.75h7c.41 0 .75-.34.75-.75 0-1.68-1.95-3-4.25-3Z" />
+              </svg>
+            )}
           </span>
         </Link>
       </header>

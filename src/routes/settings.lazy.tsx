@@ -5,6 +5,9 @@ import { useToast } from "@/components/toast";
 import { useWallet } from "@/components/wallet/wallet-provider";
 import { isPasskeySupported } from "@/lib/local-wallet";
 import { CURRENCY_OPTIONS, type CurrencyCode } from "@/lib/currencies";
+import { STELLAR_NETWORK } from "@/lib/stellar-address";
+
+const NETWORK_LABEL = STELLAR_NETWORK === "testnet" ? "Testnet" : "Mainnet";
 
 export const Route = createLazyFileRoute("/settings")({
   component: SettingsPage,
@@ -16,12 +19,13 @@ function SettingsPage() {
   const { show } = useToast();
   const wallet = useWallet();
   const [emailDraft, setEmailDraft] = useState(wallet.embeddedEmail ?? "");
+  const connectedAddr = wallet.embeddedAddress ?? wallet.destination?.address ?? null;
   const [state, setState] = useState({
-    name: "anya.xlm",
+    name: wallet.embeddedEmail ?? (connectedAddr ? wallet.shorten(connectedAddr) : "Not connected"),
     currency: "IDR" as CurrencyCode,
     region: "APAC",
-    network: "Mainnet",
-    rpc: "Horizon · default",
+    network: NETWORK_LABEL,
+    rpc: "Soroban · testnet",
     notifyOrders: true,
     notifyProofs: true,
     notifyPromos: false,
@@ -30,6 +34,8 @@ function SettingsPage() {
   const [nameOpen, setNameOpen] = useState(false);
   const [draftName, setDraftName] = useState(state.name);
   const [signOutOpen, setSignOutOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const connected = Boolean(connectedAddr);
 
   const update = (k: keyof typeof state, v: string | boolean) => {
     setState((s) => ({ ...s, [k]: v }));
@@ -123,8 +129,12 @@ function SettingsPage() {
         <Group label="Account">
           <PickRow
             label="Display name"
-            value={state.name}
+            value={connected ? state.name : "Connect wallet"}
             onClick={() => {
+              if (!connected) {
+                setConnectOpen(true);
+                return;
+              }
               setDraftName(state.name);
               setNameOpen(true);
             }}
@@ -150,24 +160,8 @@ function SettingsPage() {
         </Group>
 
         <Group label="Network">
-          <PickRow
-            label="Stellar network"
-            value={state.network}
-            onClick={() =>
-              setPicker({ label: "Stellar network", key: "network", options: ["Mainnet", "Testnet", "Futurenet"] })
-            }
-          />
-          <PickRow
-            label="RPC endpoint"
-            value={state.rpc}
-            onClick={() =>
-              setPicker({
-                label: "RPC endpoint",
-                key: "rpc",
-                options: ["Horizon · default", "Soroban RPC", "Custom"],
-              })
-            }
-          />
+          <InfoRow label="Stellar network" value={state.network} />
+          <InfoRow label="RPC endpoint" value="soroban-testnet.stellar.org" />
         </Group>
 
         <Group label="Notifications">
@@ -273,6 +267,41 @@ function SettingsPage() {
         </button>
       </Sheet>
 
+      <Sheet open={connectOpen} onClose={() => setConnectOpen(false)} title="Connect a wallet">
+        <p className="mb-4 text-sm text-muted-foreground">
+          Connect a Stellar wallet first to set a display name and receive USDC.
+        </p>
+        <div className="space-y-2">
+          {wallet.privyEnabled && (
+            <button
+              type="button"
+              disabled={wallet.isConnecting}
+              onClick={async () => {
+                await wallet.openPrivyLogin();
+                setConnectOpen(false);
+              }}
+              className="flex w-full items-center justify-between rounded-2xl bg-surface px-4 py-3.5 text-sm font-medium ring-1 ring-black/10 disabled:opacity-60"
+            >
+              <span>Sign in with email or passkey</span>
+              <span className="text-xs text-muted-foreground">Privy</span>
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={wallet.isConnecting}
+            onClick={async () => {
+              await wallet.connectExternalWallet();
+              setConnectOpen(false);
+            }}
+            className="flex w-full items-center justify-between rounded-2xl bg-primary px-4 py-3.5 text-sm font-medium text-primary-foreground disabled:opacity-60"
+          >
+            <span>Connect external wallet</span>
+            <span className="text-xs text-primary-foreground/70">Freighter, xBull…</span>
+          </button>
+          {wallet.error && <p className="pt-1 text-xs text-destructive">{wallet.error}</p>}
+        </div>
+      </Sheet>
+
       <Sheet open={signOutOpen} onClose={() => setSignOutOpen(false)} title="Sign out?">
         <p className="text-sm text-muted-foreground">
           You can sign back in any time with your recovery phrase. Your funds stay on Stellar.
@@ -336,6 +365,15 @@ function PickRow({
           </svg>
         </span>
       </button>
+    </li>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <li className="flex items-center justify-between px-4 py-3.5">
+      <span className="text-sm">{label}</span>
+      <span className="max-w-[60%] truncate text-xs text-muted-foreground">{value}</span>
     </li>
   );
 }

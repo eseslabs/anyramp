@@ -1,22 +1,33 @@
-import { useState } from "react";
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { AssetIcon } from "@/components/asset-icon";
-import { OrderSheet } from "@/components/order-sheet";
-import { orders, type Order } from "@/lib/orders";
+import { useEffect, useState } from "react";
+import { UsdcIcon } from "@/components/usdc-icon";
+import { api, EXPLORER_TX, type BackendOrder } from "@/lib/api";
 
 export const Route = createLazyFileRoute("/history")({
   component: HistoryPage,
 });
 
-function HistoryPage() {
-  const [selected, setSelected] = useState<Order | null>(null);
-  const [filter, setFilter] = useState<"all" | "onramp" | "offramp">("all");
+const STATUS: Record<string, { label: string; cls: string }> = {
+  fulfilled: { label: "ZK verified", cls: "text-accent" },
+  proving: { label: "Verifying", cls: "text-foreground" },
+  proved: { label: "Verifying", cls: "text-foreground" },
+  paid_detected: { label: "Paid", cls: "text-foreground" },
+  created: { label: "Awaiting payment", cls: "text-muted-foreground" },
+  expired: { label: "Expired", cls: "text-muted-foreground" },
+};
 
-  const filtered = orders.filter((o) => (filter === "all" ? true : o.kind === filter));
-  const grouped = ["Today", "Yesterday"].map((day) => ({
-    label: day,
-    entries: filtered.filter((o) => o.day === day),
-  }));
+function HistoryPage() {
+  const [orders, setOrders] = useState<BackendOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .listOrders()
+      .then(setOrders)
+      .catch((e) => setErr((e as Error).message))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <>
@@ -27,86 +38,72 @@ function HistoryPage() {
         </p>
       </div>
 
-      <div className="mt-5 px-4">
-        <div className="grid grid-cols-3 gap-1 rounded-full bg-surface-muted p-1 ring-1 ring-black/5">
-          {(["all", "onramp", "offramp"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`rounded-full py-2 text-xs font-medium capitalize transition-colors ${
-                filter === f
-                  ? "bg-surface text-foreground shadow-quiet"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-5 space-y-8 px-4">
-        {grouped.map((day) =>
-          day.entries.length === 0 ? null : (
-            <section key={day.label}>
-              <h2 className="px-1 pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {day.label}
-              </h2>
-              <ul className="overflow-hidden rounded-3xl bg-surface ring-1 ring-black/5">
-                {day.entries.map((e, i) => (
-                  <li key={e.id} className={i > 0 ? "border-t border-border" : ""}>
-                    <button
-                      onClick={() => setSelected(e)}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors active:bg-surface-muted"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          className={`grid size-10 shrink-0 place-items-center rounded-xl ${
-                            e.kind === "onramp"
-                              ? "bg-accent-soft"
-                              : "bg-surface-muted"
-                          }`}
-                        >
-                          <AssetIcon asset={e.asset} className="size-5 text-foreground" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium capitalize">
-                            {e.kind} · {e.asset}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">{e.fiat}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">{e.amount}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          <StatusPill status={e.status} /> · {e.when}
-                        </p>
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ),
+      <div className="mt-5 space-y-3 px-4">
+        {loading && (
+          <p className="px-1 pt-4 text-center text-sm text-muted-foreground">Loading…</p>
         )}
-        {filtered.length === 0 && (
-          <p className="px-1 pt-4 text-center text-sm text-muted-foreground">
-            No {filter} orders yet.
+        {err && (
+          <p className="px-1 pt-4 text-center text-sm text-red-600">
+            Backend offline — start the API on :4000.
           </p>
         )}
-      </div>
+        {!loading && !err && orders.length === 0 && (
+          <p className="px-1 pt-4 text-center text-sm text-muted-foreground">
+            No orders yet. Buy some USDC to see it here.
+          </p>
+        )}
 
-      <OrderSheet open={!!selected} onClose={() => setSelected(null)} order={selected} />
+        {orders.length > 0 && (
+          <ul className="overflow-hidden rounded-3xl bg-surface ring-1 ring-black/5">
+            {orders.map((o, i) => {
+              const st = STATUS[o.status] ?? STATUS.created!;
+              const when = new Date(o.createdAt).toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              const row = (
+                <div className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent-soft">
+                      <UsdcIcon className="size-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">Onramp · USDC</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        Rp{o.amountIdr.toLocaleString("id-ID")} · QRIS
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium">
+                      +{(Number(o.usdcAmount) / 1e7).toFixed(2)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      <span className={`font-medium ${st.cls}`}>{st.label}</span> · {when}
+                    </p>
+                  </div>
+                </div>
+              );
+              return (
+                <li key={o.orderId} className={i > 0 ? "border-t border-border" : ""}>
+                  {o.txHash ? (
+                    <a
+                      href={`${EXPLORER_TX}${o.txHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block transition-colors active:bg-surface-muted"
+                    >
+                      {row}
+                    </a>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </>
   );
-}
-
-function StatusPill({ status }: { status: Order["status"] }) {
-  const map = {
-    settled: { label: "ZK verified", cls: "text-accent" },
-    verifying: { label: "Verifying", cls: "text-foreground" },
-    matched: { label: "Matched", cls: "text-muted-foreground" },
-  } as const;
-  const s = map[status];
-  return <span className={`font-medium ${s.cls}`}>{s.label}</span>;
 }

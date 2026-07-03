@@ -1,40 +1,70 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { AssetIcon } from "@/components/asset-icon";
-import { OrderSheet } from "@/components/order-sheet";
-import { activeOrder, type Order } from "@/lib/orders";
+import { UsdcIcon } from "@/components/usdc-icon";
+import { api, type BackendOrder } from "@/lib/api";
+import { useWallet } from "@/components/wallet/wallet-provider";
 
 export const Route = createLazyFileRoute("/app")({
   component: HomePage,
 });
 
+const usdc = (stroops: string) => Number(stroops) / 1e7;
+
 function HomePage() {
-  const [openOrder, setOpenOrder] = useState<Order | null>(null);
-  const live = activeOrder();
+  const [orders, setOrders] = useState<BackendOrder[]>([]);
+  const wallet = useWallet();
+  const address = wallet.embeddedAddress ?? wallet.destination?.address ?? null;
+
+  useEffect(() => {
+    const load = () => api.listOrders().then(setOrders).catch(() => {});
+    load();
+    const t = setInterval(load, 5000); // keep the home live
+    return () => clearInterval(t);
+  }, []);
+
+  const fulfilled = orders.filter((o) => o.status === "fulfilled");
+  const totalUsdc = fulfilled.reduce((s, o) => s + usdc(o.usdcAmount), 0);
+  const active = orders.find((o) => !["fulfilled", "expired"].includes(o.status));
 
   return (
     <>
-      <BalanceSection />
-      <ActiveOrderCard order={live} onOpen={() => setOpenOrder(live)} />
-      <AssetsSection />
-      <OrderSheet open={!!openOrder} onClose={() => setOpenOrder(null)} order={openOrder} />
+      <BalanceSection
+        total={totalUsdc}
+        settledCount={fulfilled.length}
+        address={address ? wallet.shorten(address) : null}
+      />
+      {active && <ActiveOrderCard order={active} />}
+      <AssetsSection totalUsdc={totalUsdc} />
     </>
   );
 }
 
-function BalanceSection() {
+function BalanceSection({
+  total,
+  settledCount,
+  address,
+}: {
+  total: number;
+  settledCount: number;
+  address: string | null;
+}) {
+  const [dollars, cents] = total.toFixed(2).split(".");
   return (
     <section className="px-5 pb-6 pt-4">
       <div className="space-y-1">
-        <span className="text-sm font-medium text-muted-foreground">Portfolio balance</span>
+        <span className="text-sm font-medium text-muted-foreground">
+          On-ramped via AnyRamp {address ? <span className="text-foreground/70">· {address}</span> : null}
+        </span>
         <div className="flex items-baseline gap-2">
           <h1 className="text-4xl font-medium tracking-tight">
-            $12,482<span className="text-muted-foreground">.50</span>
+            ${Number(dollars).toLocaleString("en-US")}
+            <span className="text-muted-foreground">.{cents}</span>
           </h1>
-          <span className="text-sm font-medium text-accent">+2.4%</span>
+          <span className="text-sm font-medium text-accent">USDC</span>
         </div>
         <p className="pt-1 text-xs text-muted-foreground">
-          Settled on Stellar · <span className="font-serif italic">verified by ZK</span>
+          {settledCount} settlement{settledCount === 1 ? "" : "s"} verified on Stellar by ZK
+          {address ? null : " · connect a wallet in Settings"}
         </p>
       </div>
 
@@ -66,9 +96,6 @@ function BalanceSection() {
           aria-disabled="true"
           className="relative flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-full bg-surface-muted/60 px-3 py-2 text-sm font-medium text-muted-foreground/50 ring-1 ring-black/5"
         >
-          <svg className="size-3.5 shrink-0 opacity-50" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-            <path d="M3.75 7.25a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z" />
-          </svg>
           <span className="truncate">Sell to fiat</span>
           <span className="shrink-0 rounded-full bg-surface px-1.5 py-px text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
             Coming soon
@@ -79,14 +106,19 @@ function BalanceSection() {
   );
 }
 
-function ActiveOrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
+const STEP_LABEL: Record<string, string> = {
+  created: "Awaiting payment",
+  paid_detected: "Payment detected",
+  proving: "Verifying zkTLS proof",
+  proved: "zkTLS proof ready",
+};
+
+function ActiveOrderCard({ order }: { order: BackendOrder }) {
+  const paid = order.status !== "created";
+  const proofDone = order.status === "proved";
   return (
     <section className="px-4">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="block w-full rounded-3xl bg-surface p-5 text-left shadow-quiet ring-1 ring-black/5 transition-transform active:scale-[0.99]"
-      >
+      <div className="block w-full rounded-3xl bg-surface p-5 text-left shadow-quiet ring-1 ring-black/5">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="relative flex size-2">
@@ -95,60 +127,47 @@ function ActiveOrderCard({ order, onOpen }: { order: Order; onOpen: () => void }
             </span>
             <span className="text-sm font-medium text-foreground">Order in progress</span>
           </div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            ID {order.id}
+          <span className="max-w-[9rem] truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {order.orderId}
           </span>
         </header>
 
         <div className="mb-8 flex items-end justify-between">
           <div>
-            <p className="mb-1 text-xs text-muted-foreground">
-              {order.kind === "onramp" ? "Buying" : "Selling"}
-            </p>
+            <p className="mb-1 text-xs text-muted-foreground">Buying</p>
             <p className="text-2xl font-medium tracking-tight">
-              {order.amount.replace(/^[+−-]/, "")}{" "}
-              <span className="font-serif italic text-muted-foreground">{order.asset}</span>
+              {usdc(order.usdcAmount).toFixed(2)}{" "}
+              <span className="font-serif italic text-muted-foreground">USDC</span>
             </p>
           </div>
           <div className="text-right">
-            <p className="mb-1 text-xs text-muted-foreground">Rate</p>
-            <p className="text-sm font-medium">{order.rate}</p>
+            <p className="mb-1 text-xs text-muted-foreground">You pay</p>
+            <p className="text-sm font-medium">Rp{order.amountIdr.toLocaleString("id-ID")}</p>
           </div>
         </div>
 
-        <Stepper />
-
-        <span className="mt-6 flex w-full items-center justify-center gap-1.5 rounded-full bg-surface-muted py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground ring-1 ring-black/5">
-          Tap to view proof
-          <svg className="size-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-            <path d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 1 1-1.06-1.06L8.94 8 6.22 5.28a.75.75 0 0 1 0-1.06Z" />
-          </svg>
-        </span>
-      </button>
+        <ol className="space-y-1">
+          <Step state={paid ? "done" : "active"} title="Payment via QRIS" last={false} />
+          <Step
+            state={proofDone ? "done" : order.status === "proving" ? "active" : "upcoming"}
+            title={STEP_LABEL[order.status] ?? "zkTLS proof"}
+            last={false}
+          />
+          <Step state="upcoming" title="Verify & settle on Stellar" last />
+        </ol>
+      </div>
     </section>
-  );
-}
-
-function Stepper() {
-  return (
-    <ol className="space-y-1">
-      <Step state="done" title="Peer matched" subtitle="Verified match found in 1.2s" />
-      <Step state="active" title="ZK proof generation" subtitle="Encrypting payment metadata" />
-      <Step state="upcoming" title="Settlement on Stellar" subtitle="Awaiting cryptographic verification" last />
-    </ol>
   );
 }
 
 function Step({
   state,
   title,
-  subtitle,
   last,
 }: {
   state: "done" | "active" | "upcoming";
   title: string;
-  subtitle?: string;
-  last?: boolean;
+  last: boolean;
 }) {
   return (
     <li className="flex gap-4">
@@ -184,89 +203,41 @@ function Step({
         >
           {title}
         </p>
-        {subtitle && state !== "active" && (
-          <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
-        )}
-        {subtitle && state === "active" && (
-          <span className="mt-2 inline-flex items-center gap-2 rounded-md bg-surface-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-black/5">
-            <svg className="size-3 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="2" className="opacity-25" />
-              <path d="M8 1a7 7 0 0 1 7 7h-2a5 5 0 0 0-5-5V1Z" fill="currentColor" className="opacity-75" />
-            </svg>
-            {subtitle}
-          </span>
-        )}
       </div>
     </li>
   );
 }
 
-type Asset = {
-  symbol: string;
-  name: string;
-  amount: string;
-  usd: string;
-  glyph: "stellar" | "usdc";
-  asset: "USDC" | "XLM";
-};
-
-const assets: Asset[] = [
-  {
-    symbol: "XLM",
-    name: "Stellar",
-    amount: "4,290.00",
-    usd: "$482.10",
-    glyph: "stellar",
-    asset: "XLM",
-  },
-  {
-    symbol: "USDC",
-    name: "USD Coin",
-    amount: "12,000.40",
-    usd: "$12,000.40",
-    glyph: "usdc",
-    asset: "USDC",
-  },
-];
-
-function AssetsSection() {
+function AssetsSection({ totalUsdc }: { totalUsdc: number }) {
   return (
     <section className="mt-10 px-5">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm font-medium text-muted-foreground">Your assets</h3>
-        {/* <span className="text-[11px] font-medium text-accent">Stellar mainnet</span> */}
+        <span className="text-[11px] font-medium text-accent">Stellar testnet</span>
       </div>
       <ul className="space-y-2">
-        {assets.map((a) => (
-          <li key={a.symbol}>
-            <Link
-              to="/transfer"
-              search={{ asset: a.asset }}
-              className="flex items-center justify-between rounded-2xl px-2 py-2 -mx-2 transition-colors active:bg-surface-muted"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <AssetGlyph kind={a.glyph} />
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{a.name}</p>
-                  <p className="text-xs text-muted-foreground">{a.symbol}</p>
-                </div>
+        <li>
+          <Link
+            to="/transfer"
+            search={{ asset: "USDC" as const }}
+            className="-mx-2 flex items-center justify-between rounded-2xl px-2 py-2 transition-colors active:bg-surface-muted"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-muted">
+                <UsdcIcon className="size-6" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-medium">USD Coin</p>
+                <p className="text-xs text-muted-foreground">USDC</p>
               </div>
-              <div className="text-right">
-                <p className="font-medium">{a.amount}</p>
-                <p className="text-xs text-muted-foreground">{a.usd}</p>
-              </div>
-            </Link>
-          </li>
-        ))}
+            </div>
+            <div className="text-right">
+              <p className="font-medium">{totalUsdc.toFixed(2)}</p>
+              <p className="text-xs text-muted-foreground">${totalUsdc.toFixed(2)}</p>
+            </div>
+          </Link>
+        </li>
       </ul>
     </section>
-  );
-}
-
-function AssetGlyph({ kind }: { kind: Asset["glyph"] }) {
-  return (
-    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-muted">
-      <AssetIcon asset={kind} className="size-6 text-foreground" />
-    </span>
   );
 }
