@@ -1,6 +1,6 @@
 # AnyRamp
 
-**Trustless IDR → USDC on-ramp — verified by zkTLS on Stellar**
+**Trustless P2P IDR → USDC onramp — verified by zkTLS on Stellar**
 
 Pay in Rupiah. Get USDC. No trust required.
 
