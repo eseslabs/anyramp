@@ -5,6 +5,7 @@ import { AssetIcon } from "@/components/asset-icon";
 import { StellarIcon } from "@/components/stellar-icon";
 import { UsdcIcon } from "@/components/usdc-icon";
 import { useToast } from "@/components/toast";
+import { useWallet } from "@/components/wallet/wallet-provider";
 import { formatFiat, type CurrencyCode } from "@/lib/currencies";
 import {
   addLiquidityPosition,
@@ -34,7 +35,7 @@ export const Route = createLazyFileRoute("/earn/add-liquidity")({
   component: AddLiquidityPage,
 });
 
-type Stage = "idle" | "review" | "signing" | "approving" | "locking" | "done";
+type Stage = "idle" | "review" | "signing" | "approving" | "locking" | "done" | "error";
 
 const quickAmounts: Record<LiquidityAsset, string[]> = {
   USDC: ["500", "1000", "2500", "5000"],
@@ -45,6 +46,8 @@ function AddLiquidityPage() {
   const { pool } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { show } = useToast();
+  const wallet = useWallet();
+  const sellerAddress = wallet.destination?.address ?? wallet.embeddedAddress ?? null;
   const isOnramp = pool === "onramp";
   const asset: LiquidityAsset = isOnramp ? "USDC" : "XLM";
 
@@ -56,6 +59,7 @@ function AddLiquidityPage() {
   );
   const [stage, setStage] = useState<Stage>("idle");
   const [positionId, setPositionId] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const numericAmount = Number(amount.replace(/[^\d.]/g, "")) || 0;
@@ -65,6 +69,7 @@ function AddLiquidityPage() {
     setMarkupBps(isOnramp ? 25 : 0);
     setMaxOrderFiat(isOnramp ? 1_000_000 : 500_000);
     setSelectedGateways(isOnramp ? DEFAULT_ONRAMP_GATEWAYS : []);
+    setError(null);
   }, [isOnramp]);
 
   useEffect(() => {
@@ -77,28 +82,46 @@ function AddLiquidityPage() {
       return () => clearTimeout(t);
     }
     if (stage === "locking") {
-      const t = setTimeout(() => {
-        const position = addLiquidityPosition({
-          pool,
-          asset,
-          deposited: numericAmount,
-          rateMarkupBps: markupBps,
-          maxOrderFiat,
-          paymentGateways: isOnramp ? selectedGateways : [],
-          apy: isOnramp ? ONRAMP_APY : TOPUP_APY,
+      if (!sellerAddress) {
+        setError("Connect a Stellar wallet first to create a pool.");
+        setStage("error");
+        return;
+      }
+      let cancelled = false;
+      addLiquidityPosition({
+        sellerAddress,
+        pool,
+        asset,
+        deposited: numericAmount,
+        rateMarkupBps: markupBps,
+        maxOrderFiat,
+        paymentGateways: isOnramp ? selectedGateways : [],
+        apy: isOnramp ? ONRAMP_APY : TOPUP_APY,
+      })
+        .then((position) => {
+          if (!cancelled) {
+            setPositionId(position.id);
+            setStage("done");
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setError(e instanceof Error ? e.message : "Failed to create pool");
+            setStage("error");
+          }
         });
-        setPositionId(position.id);
-        setStage("done");
-      }, 1800);
-      return () => clearTimeout(t);
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [stage, pool, asset, markupBps, maxOrderFiat, isOnramp, numericAmount, selectedGateways]);
+  }, [stage, pool, asset, markupBps, maxOrderFiat, isOnramp, numericAmount, selectedGateways, sellerAddress]);
 
   const walletBalance = WALLET_BALANCES[asset];
   const insufficient = numericAmount > walletBalance;
   const noGatewaysSelected = isOnramp && selectedGateways.length === 0;
   const missingCredentials = isOnramp ? gatewaysMissingCredentials(selectedGateways) : [];
   const estimatedApy = isOnramp ? ONRAMP_APY : TOPUP_APY;
+  const noWallet = !sellerAddress;
 
   const supportedFiat = useMemo(
     () => supportedFiatVolume(numericAmount, asset, markupBps),
@@ -120,14 +143,17 @@ function AddLiquidityPage() {
   const closeSheet = () => {
     if (inProgress) return;
     setStage("idle");
+    setError(null);
   };
 
   const sheetTitle =
     stage === "done"
       ? "Liquidity added"
-      : inProgress
-        ? "Depositing"
-        : "Review deposit";
+      : stage === "error"
+        ? "Deposit failed"
+        : inProgress
+          ? "Depositing"
+          : "Review deposit";
 
   return (
     <>
@@ -359,6 +385,14 @@ function AddLiquidityPage() {
         </div>
       </section>
 
+      {noWallet && (
+        <section className="mt-4 px-5">
+          <p className="rounded-2xl bg-destructive/10 px-4 py-3 text-xs font-medium text-destructive ring-1 ring-destructive/15">
+            Connect a Stellar wallet to create a pool.
+          </p>
+        </section>
+      )}
+
       <section className="mt-8 px-5 pb-6">
         <button
           type="button"
@@ -367,7 +401,8 @@ function AddLiquidityPage() {
             numericAmount <= 0 ||
             insufficient ||
             noGatewaysSelected ||
-            missingCredentials.length > 0
+            missingCredentials.length > 0 ||
+            noWallet
           }
           className="w-full rounded-full bg-primary py-4 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-50"
         >
@@ -463,6 +498,32 @@ function AddLiquidityPage() {
                 View positions
               </Link>
             </div>
+          </div>
+        )}
+
+        {stage === "error" && (
+          <div className="space-y-5">
+            <div className="grid place-items-center pt-2">
+              <span className="grid size-14 place-items-center rounded-full bg-destructive/10 text-destructive ring-1 ring-destructive/15">
+                <svg className="size-7" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                  <path
+                    fillRule="evenodd"
+                    d="M8.6 1.55a1.25 1.25 0 0 0-1.2 0L2.1 4.8A1.25 1.25 0 0 0 1.45 6v6.5a1.25 1.25 0 0 0 .65 1.1l5.3 3.25c.37.23.83.23 1.2 0l5.3-3.25a1.25 1.25 0 0 0 .65-1.1V6a1.25 1.25 0 0 0-.65-1.1L8.6 1.55ZM8 4.5c.4 0 .75.35.75.75v4.5a.75.75 0 0 1-1.5 0V5.25c0-.4.35-.75.75-.75Zm0 7a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </span>
+            </div>
+            <p className="text-center text-sm text-muted-foreground">
+              {error ?? "Could not create the pool."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setStage("review")}
+              className="w-full rounded-full bg-primary py-3.5 text-sm font-medium text-primary-foreground"
+            >
+              Try again
+            </button>
           </div>
         )}
       </Sheet>

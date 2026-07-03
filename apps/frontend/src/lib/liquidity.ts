@@ -3,6 +3,7 @@ import {
   DEFAULT_ONRAMP_GATEWAYS,
   type PaymentGatewayId,
 } from "@/lib/payment-gateways";
+import { api, type BackendPool } from "@/lib/api";
 
 export type PoolType = "onramp" | "topup";
 export type LiquidityAsset = "USDC" | "XLM";
@@ -19,36 +20,6 @@ export type LiquidityPosition = {
   earnedFiat: number;
   createdAt: string;
 };
-
-const STORAGE_KEY = "anyramp-liquidity-positions";
-const FIAT: CurrencyCode = "IDR";
-
-const DEMO_POSITIONS: LiquidityPosition[] = [
-  {
-    id: "LP-4200-USDC",
-    pool: "onramp",
-    asset: "USDC",
-    deposited: 4200,
-    rateMarkupBps: 25,
-    maxOrderFiat: 1_000_000,
-    paymentGateways: ["gopay-merchant", "dana-bisnis", "pakasir"],
-    apy: 8.2,
-    earnedFiat: 128_400,
-    createdAt: "2026-06-01T08:00:00.000Z",
-  },
-  {
-    id: "LP-12500-XLM",
-    pool: "topup",
-    asset: "XLM",
-    deposited: 12_500,
-    rateMarkupBps: 0,
-    maxOrderFiat: 500_000,
-    paymentGateways: [],
-    apy: 6.4,
-    earnedFiat: 42_100,
-    createdAt: "2026-06-10T14:30:00.000Z",
-  },
-];
 
 export const WALLET_BALANCES: Record<LiquidityAsset, number> = {
   USDC: 8420,
@@ -68,101 +39,50 @@ export const RATE_MARKUP_OPTIONS = [
 
 export const VOLUME_CAP_OPTIONS = [500_000, 1_000_000, 2_500_000, 5_000_000] as const;
 
-let cachedSnapshot: LiquidityPosition[] = DEMO_POSITIONS;
-let cachedStorageRaw: string | null | undefined;
+const FIAT: CurrencyCode = "IDR";
 
-type StoredLiquidityPosition = Omit<LiquidityPosition, "paymentGateways"> & {
-  paymentGateways?: PaymentGatewayId[];
-  paymentMethod?: string;
-};
-
-function normalizePosition(raw: StoredLiquidityPosition): LiquidityPosition {
-  if (Array.isArray(raw.paymentGateways)) {
-    const { paymentMethod: _legacy, ...position } = raw;
-    return position as LiquidityPosition;
-  }
-
-  const { paymentMethod: _legacy, ...position } = raw;
-  const paymentGateways = position.pool === "onramp" ? DEFAULT_ONRAMP_GATEWAYS : [];
-
-  return { ...position, paymentGateways };
-}
-
-function loadSnapshot(): LiquidityPosition[] {
-  if (typeof window === "undefined") return DEMO_POSITIONS;
-
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === cachedStorageRaw) return cachedSnapshot;
-
-  cachedStorageRaw = raw;
-  if (!raw) {
-    cachedSnapshot = DEMO_POSITIONS;
-    return cachedSnapshot;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as StoredLiquidityPosition[];
-    cachedSnapshot = parsed.length
-      ? parsed.map(normalizePosition)
-      : DEMO_POSITIONS;
-  } catch {
-    cachedSnapshot = DEMO_POSITIONS;
-  }
-  return cachedSnapshot;
-}
-
-function readStore(): LiquidityPosition[] {
-  return loadSnapshot();
-}
-
-function writeStore(positions: LiquidityPosition[]) {
-  const serialized = JSON.stringify(positions);
-  localStorage.setItem(STORAGE_KEY, serialized);
-  cachedStorageRaw = serialized;
-  cachedSnapshot = positions;
-}
-
-export function subscribeLiquidityPositions(onStoreChange: () => void) {
-  const onStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
-      cachedStorageRaw = undefined;
-      onStoreChange();
-    }
-  };
-  const onUpdated = () => onStoreChange();
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener("anyramp-liquidity-updated", onUpdated);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener("anyramp-liquidity-updated", onUpdated);
+function toLiquidityPosition(p: BackendPool): LiquidityPosition {
+  return {
+    id: p.id,
+    pool: p.pool,
+    asset: p.asset,
+    deposited: p.deposited,
+    rateMarkupBps: p.rateMarkupBps,
+    maxOrderFiat: p.maxOrderFiat,
+    paymentGateways: (p.paymentGateways as PaymentGatewayId[]) ??
+      (p.pool === "onramp" ? DEFAULT_ONRAMP_GATEWAYS : []),
+    apy: p.apy,
+    earnedFiat: p.earnedFiat,
+    createdAt: p.createdAt,
   };
 }
 
-export function getLiquidityPositions(): LiquidityPosition[] {
-  return loadSnapshot();
+export async function getLiquidityPositions(): Promise<LiquidityPosition[]> {
+  const pools = await api.listPools();
+  return pools.map(toLiquidityPosition);
 }
 
-export function getLiquidityPositionsServerSnapshot(): LiquidityPosition[] {
-  return DEMO_POSITIONS;
+export async function getMyLiquidityPositions(sellerAddress: string): Promise<LiquidityPosition[]> {
+  const pools = await api.listMyPools(sellerAddress);
+  return pools.map(toLiquidityPosition);
 }
 
-export function addLiquidityPosition(
-  input: Omit<LiquidityPosition, "id" | "createdAt" | "earnedFiat">,
-): LiquidityPosition {
-  const position: LiquidityPosition = {
-    ...input,
-    id: generatePositionId(input.asset),
-    earnedFiat: 0,
-    createdAt: new Date().toISOString(),
-  };
-  const existing = readStore();
-  writeStore([position, ...existing]);
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("anyramp-liquidity-updated"));
-  }
-  return position;
+export async function addLiquidityPosition(
+  input: Omit<LiquidityPosition, "id" | "createdAt" | "earnedFiat"> & {
+    sellerAddress: string;
+  },
+): Promise<LiquidityPosition> {
+  const pool = await api.createPool({
+    sellerAddress: input.sellerAddress,
+    pool: input.pool,
+    asset: input.asset,
+    deposited: input.deposited,
+    rateMarkupBps: input.rateMarkupBps,
+    maxOrderFiat: input.maxOrderFiat,
+    paymentGateways: input.paymentGateways,
+    apy: input.apy,
+  });
+  return toLiquidityPosition(pool);
 }
 
 export function generatePositionId(asset: LiquidityAsset): string {

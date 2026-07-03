@@ -1,5 +1,5 @@
 {
-  "id": "538dd7b0-d64f-49bc-b820-83452661a804",
+  "id": "8ffcfc26-c833-4621-b62d-d125d2d86631",
   "prevId": "da27ff71-7c35-4d80-bfd0-e199558adfe4",
   "version": "7",
   "dialect": "postgresql",
@@ -131,7 +131,7 @@
         },
         "deposited": {
           "name": "deposited",
-          "type": "numeric",
+          "type": "real",
           "primaryKey": false,
           "notNull": true
         },
@@ -156,13 +156,13 @@
         },
         "apy": {
           "name": "apy",
-          "type": "numeric",
+          "type": "real",
           "primaryKey": false,
           "notNull": true
         },
         "earned_fiat": {
           "name": "earned_fiat",
-          "type": "numeric",
+          "type": "real",
           "primaryKey": false,
           "notNull": true,
           "default": 0

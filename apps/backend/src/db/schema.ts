@@ -5,7 +5,7 @@ import {
   jsonb,
   timestamp,
   pgEnum,
-  numeric,
+  real,
 } from 'drizzle-orm/pg-core';
 
 // Mirrors the on-chain Order lifecycle. Webhook = 'paid_detected' hint only;
@@ -55,12 +55,12 @@ export const pools = pgTable('pools', {
   sellerAddress: text('seller_address').notNull(),
   pool: poolType('pool').notNull(),
   asset: assetType('asset').notNull(),
-  deposited: numeric('deposited', { mode: 'number' }).notNull(),
+  deposited: real('deposited').notNull(),
   rateMarkupBps: integer('rate_markup_bps').notNull(),
   maxOrderFiat: integer('max_order_fiat').notNull(),
   paymentGateways: paymentGateway('payment_gateways').array().notNull().default([]),
-  apy: numeric('apy', { mode: 'number' }).notNull(),
-  earnedFiat: numeric('earned_fiat', { mode: 'number' }).notNull().default(0),
+  apy: real('apy').notNull(),
+  earnedFiat: real('earned_fiat').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

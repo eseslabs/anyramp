@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createLazyFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { ArrowRight, Droplets, TrendingUp } from "lucide-react";
 import { AssetIcon } from "@/components/asset-icon";
@@ -8,9 +8,7 @@ import {
   formatDeposited,
   formatEarned,
   getLiquidityPositions,
-  getLiquidityPositionsServerSnapshot,
   poolLabel,
-  subscribeLiquidityPositions,
   totalStats,
   type LiquidityPosition,
 } from "@/lib/liquidity";
@@ -27,13 +25,28 @@ function EarnRoute() {
 
 function EarnPage() {
   const { highlight } = Route.useSearch();
-  const positions = useSyncExternalStore(
-    subscribeLiquidityPositions,
-    getLiquidityPositions,
-    getLiquidityPositionsServerSnapshot,
-  );
+  const [positions, setPositions] = useState<LiquidityPosition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const stats = totalStats(positions);
   const positionsRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLiquidityPositions()
+      .then((data) => {
+        if (!cancelled) setPositions(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load pools");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!highlight) return;
@@ -97,12 +110,20 @@ function EarnPage() {
       </section>
 
       <section ref={positionsRef} id="earn-positions" className="mt-8 px-5 pb-6">
-        <h2 className="mb-4 text-sm font-medium text-muted-foreground">Your positions</h2>
-        <ul className="space-y-2">
-          {positions.map((p) => (
-            <PositionRow key={p.id} position={p} highlighted={p.id === highlight} />
-          ))}
-        </ul>
+        <h2 className="mb-4 text-sm font-medium text-muted-foreground">Active pools</h2>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading pools…</p>
+        ) : error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : positions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active pools yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {positions.map((p) => (
+              <PositionRow key={p.id} position={p} highlighted={p.id === highlight} />
+            ))}
+          </ul>
+        )}
       </section>
     </>
   );
